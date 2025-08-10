@@ -89,6 +89,8 @@ export default function KbStatusBar() {
   useEffect(() => { fetchStats(); }, []);
 
   const ok = !!stats.model && !!stats.dim && typeof stats.docs === "number";
+  const minTxt = env.RAG_MIN_SCORE == null ? "off" : String(env.RAG_MIN_SCORE);
+  const arbiter = env.RAG_ARBITER || "rules";
 
   return (
     <div style={styles.bar}>
@@ -111,7 +113,7 @@ export default function KbStatusBar() {
 
       <div style={styles.right}>
         <span style={{ ...styles.env }}>
-          k={env.RAG_TOP_K ?? "—"} | min={env.RAG_MIN_SCORE ?? "—"} | var={env.RAG_QVARIANTS ?? "—"}
+          k={env.RAG_TOP_K ?? "—"} | min={minTxt} | var={env.RAG_QVARIANTS ?? "—"} | arbiter={arbiter}
         </span>
         <button onClick={fetchStats} disabled={loading} style={styles.btnGhost} title="Actualiser">
           {loading ? "…" : "Actualiser"}

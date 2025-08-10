@@ -25,10 +25,10 @@ const MAX_CTX_CH   = clamp(Number(process.env.RAG_MAX_CONTEXT_CHARS || 8000), 20
 
 // -------- Variantes simples (sans LLM) --------
 const SYN = [
-  [/\\brelancer\\b/gi, "redémarrer"],
-  [/\\brestart\\b/gi, "redémarrer"],
-  [/\\bservice\\b/gi, "daemon"],
-  [/\\bconf(ig)?\\b/gi, "configuration"],
+  [/\brelancer\b/gi, "redémarrer"],
+  [/\brestart\b/gi,  "redémarrer"],
+  [/\bservice\b/gi,  "daemon"],
+  [/\bconf(ig)?\b/gi,"configuration"],
 ];
 
 function makeVariants(q, n) {
@@ -36,8 +36,8 @@ function makeVariants(q, n) {
   if (n <= 1) return out.filter(Boolean);
 
   // Variante 1: sans stopwords très simples
-  const stop = /\\b(le|la|les|un|une|des|de|du|dans|sur|pour|avec|et|ou|à|au|aux|en)\\b/gi;
-  out.push(q.replace(stop, " ").replace(/\\s+/g, " ").trim());
+  const stop = /\b(le|la|les|un|une|des|de|du|dans|sur|pour|avec|et|ou|à|au|aux|en)\b/gi;
+  out.push(q.replace(stop, " ").replace(/\s+/g, " ").trim());
 
   // Variante 2: synonymes ciblés (DNS/BIND, op sys)
   if (n >= 3) {
@@ -52,7 +52,6 @@ function makeVariants(q, n) {
 
 // -------- Prompt helpers --------
 function normSource(s) {
-  // Garde seulement le nom de fichier pour l'affichage/validation
   try { return path.basename(String(s || "").trim()); } catch { return String(s || ""); }
 }
 
@@ -63,7 +62,8 @@ function buildPrompt({ system, question, context }) {
     "Réponds en français, technique et concis.",
     "NE mets pas 'Sources:' au milieu de la réponse.",
     "Termine impérativement par UNE LIGNE unique: Sources: <fichier1>, <fichier2>",
-  ].join("\n- ");
+  ];
+  const rulesStr = RULES.map(r => `- ${r}`).join("\n");
 
   const ctxStr = context.map((c, i) => {
     const src = normSource(c.source);
@@ -77,8 +77,8 @@ ${c.text}
 `SYSTEM:
 ${system}
 
-REGLES:
-- ${RULES.join("\n- ")}
+RÈGLES:
+${rulesStr}
 
 CONTEXTE:
 ${ctxStr}
@@ -91,10 +91,9 @@ ASSISTANT:`).trim();
 
 // -------- Arbitre (rules/LLM/off) --------
 function parseSourcesLine(s) {
-  // accepte: "Sources: a,b", "Sources: a; b", listes
   if (!s) return [];
-  const line = (s.split("\n").find((l) => /\\bSources\\s*:/i.test(l)) || "")
-                .replace(/.*Sources\\s*:/i, "");
+  const line = (s.split("\n").find((l) => /\bSources\s*:/i.test(l)) || "")
+                .replace(/.*Sources\s*:/i, "");
   return line
     .split(/[;,]/g)
     .map((x) => normSource(x).trim())
@@ -106,7 +105,7 @@ async function arbitrate({ mode, model, question, context, draft, allowedSources
 
   if (mode === "rules") {
     // doit contenir "Sources:"
-    if (!/(^|\\n)\\s*Sources\\s*:/i.test(draft)) {
+    if (!/(^|\n)\s*Sources\s*:/i.test(draft)) {
       return { final: "Je n'ai pas trouvé d'information suffisante dans la base pour répondre précisément." };
     }
     const cited = parseSourcesLine(draft);
@@ -136,7 +135,7 @@ ${c.text}`).join("\n\n---\n\n")}
 QUESTION:
 ${question}
 
-REPONSE PROPOSEE:
+RÉPONSE PROPOSÉE:
 ${draft}
 
 INSTRUCTIONS:
@@ -153,9 +152,9 @@ INSTRUCTIONS:
 }
 
 // -------- Route factory --------
-export default function createAskRagRouter({ model, SYSTEM_PROMPT, logChat }) {
+export default function createAskRagRouter({ model, SYSTEM_PROMPT, logChat, search: injectedSearch }) {
   const router = express.Router();
-  const search = getSearch();
+  const search = injectedSearch || getSearch(); // fallback si non injecté
 
   router.post("/", async (req, res) => {
     const started = Date.now();
@@ -294,6 +293,7 @@ export default function createAskRagRouter({ model, SYSTEM_PROMPT, logChat }) {
 
       return res.json({ reply: final, meta: { rid, durationMs, sources, evidence }, actions });
     } catch (err) {
+      req.log?.error?.({ err, rid }, "ask_rag_failed");
       const durationMs = Date.now() - started;
 
       const msg = String(err?.message || "");

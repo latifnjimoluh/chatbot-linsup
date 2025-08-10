@@ -1,110 +1,111 @@
 // routes/kb.js
+// Endpoints utilitaires relatifs à la base de connaissance (RAG)
 import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import rateLimit from "express-rate-limit";
-import { nanoid } from "nanoid";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const VECTOR_DIR = path.resolve(__dirname, "..", process.env.VECTOR_DIR || "vectorstore");
+const INDEX_FILE = path.join(VECTOR_DIR, "index.json");
 const KB_DIR = path.resolve(__dirname, "..", process.env.KB_DIR || "knowledge_base");
-const ALLOWED = new Set([".md", ".txt", ".log", ".sh", ".conf", ".cfg", ".ini", ".yaml", ".yml"]);
-const MAX_FILE_SIZE = 200 * 1024; // 200 Ko
-
-async function walk(dir) {
-  const out = [];
-  const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
-  for (const e of entries) {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...await walk(full));
-    else if (ALLOWED.has(path.extname(e.name).toLowerCase())) out.push(full);
-  }
-  return out;
-}
-
-const fileLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
 
 export default function createKbRouter({ search }) {
   const router = express.Router();
 
-  const envSnapshot = () => ({
-    RAG_TOP_K: Number(process.env.RAG_TOP_K || 3),
-    RAG_MIN_SCORE:
-      process.env.RAG_MIN_SCORE === "" || process.env.RAG_MIN_SCORE == null
-        ? null
-        : Number(process.env.RAG_MIN_SCORE),
-    RAG_QVARIANTS: Number(process.env.RAG_QVARIANTS || 1),
-    RAG_ARBITER: String(process.env.RAG_ARBITER || "rules"),
-    SEARCH_BACKEND: String(process.env.SEARCH_BACKEND || "json"),
-    VECTOR_DIR: String(process.env.VECTOR_DIR || "vectorstore"),
-  });
-
+  // --- Recharge l'index (JSON) sans redémarrer le serveur
   router.post("/reload", async (_req, res) => {
     try {
-      await search.reload?.();
-      const stats = await search.stats?.();
-      res.json({ backend: search?.name || "json", env: envSnapshot(), stats });
-    } catch (err) {
-      res.status(500).json({ error: String(err?.message || err) });
-    }
-  });
-
-  router.get("/stats", async (_req, res) => {
-    try {
-      const stats = await search.stats?.();
-      res.json({ backend: search?.name || "json", env: envSnapshot(), stats });
-    } catch (err) {
-      res.status(500).json({ error: String(err?.message || err) });
-    }
-  });
-
-  router.get("/ready", async (_req, res) => {
-    try {
-      await search.ensureReady?.();
+      if (typeof search?.reload === "function") {
+        await search.reload();
+      }
+      // Renvoie aussi les stats pour que le frontend puisse rafraîchir l'UI
+      if (fs.existsSync(INDEX_FILE)) {
+        const raw = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
+        const stats = {
+          model: raw?.model || null,
+          createdAt: raw?.createdAt || null,
+          dim: raw?.dim || null,
+          docs: Array.isArray(raw?.docs) ? raw.docs.length : null,
+          vectors: Array.isArray(raw?.vectors) ? raw.vectors.length : null,
+          path: INDEX_FILE,
+        };
+        return res.json({
+          backend: search?.name || "json",
+          env: {
+            RAG_TOP_K: Number(process.env.RAG_TOP_K || 3),
+            RAG_MIN_SCORE: process.env.RAG_MIN_SCORE === "" ? null : Number(process.env.RAG_MIN_SCORE || 0),
+            RAG_QVARIANTS: Number(process.env.RAG_QVARIANTS || 1),
+          },
+          stats,
+        });
+      }
       res.json({ ok: true, backend: search?.name || "json" });
     } catch (err) {
-      res.status(503).json({ ok: false, error: String(err?.message || err) });
+      res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
   });
 
-  // --- Liste des fichiers de la KB ---
-  router.get("/files", async (_req, res) => {
+  // --- Statistiques de la KB
+  router.get("/stats", async (_req, res) => {
     try {
-      const files = await walk(KB_DIR);
-      const out = await Promise.all(
-        files.map(async (f) => {
-          const st = await fs.promises.stat(f).catch(() => null);
-          if (!st) return null;
-          return { name: path.basename(f), size: st.size, mtime: st.mtimeMs };
-        })
-      );
-      res.json({ files: out.filter(Boolean) });
+      const backend = search?.name || "json";
+      const env = {
+        RAG_TOP_K: Number(process.env.RAG_TOP_K || 3),
+        RAG_MIN_SCORE:
+          process.env.RAG_MIN_SCORE === "" ? null : Number(process.env.RAG_MIN_SCORE || 0),
+        RAG_QVARIANTS: Number(process.env.RAG_QVARIANTS || 1),
+        RAG_ARBITER: (process.env.RAG_ARBITER || "rules"),
+      };
+
+      if (backend === "json") {
+        if (!fs.existsSync(INDEX_FILE)) {
+          return res.status(404).json({ backend, error: "index.json introuvable" });
+        }
+        const raw = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
+        const stats = {
+          model: raw?.model || null,
+          createdAt: raw?.createdAt || null,
+          dim: raw?.dim || null,
+          docs: Array.isArray(raw?.docs) ? raw.docs.length : null,
+          vectors: Array.isArray(raw?.vectors) ? raw.vectors.length : null,
+          path: INDEX_FILE,
+        };
+        return res.json({ backend, env, stats });
+      }
+
+      // Pinecone (si tu l’actives plus tard)
+      if (backend === "pinecone") {
+        const stats = {
+          index: process.env.PINECONE_INDEX || null,
+          namespace: process.env.PINECONE_NAMESPACE || null,
+          note: "Stats détaillées côté Pinecone non interrogées depuis cette route.",
+        };
+        return res.json({ backend, env, stats });
+      }
+
+      res.json({ backend, env });
     } catch (err) {
       res.status(500).json({ error: String(err?.message || err) });
     }
   });
 
-  // --- Lecture d'un fichier ---
-  router.get("/file", fileLimiter, async (req, res) => {
-    const rid = req.id || nanoid(10);
-    res.setHeader("x-rid", rid);
+  // --- Lecture read-only d’un fichier de la KB (Phase C)
+  router.get("/file", async (req, res) => {
     try {
-      const name = String(req.query.source || "");
-      if (!name || name.includes("..") || name.includes("/") || name.includes("\\")) {
-        return res.status(400).json({ error: "invalid_source", rid });
-      }
-      const ext = path.extname(name).toLowerCase();
-      if (!ALLOWED.has(ext)) return res.status(400).json({ error: "forbidden_ext", rid });
-      const full = path.join(KB_DIR, name);
-      const st = await fs.promises.stat(full).catch(() => null);
-      if (!st || !st.isFile()) return res.status(404).json({ error: "not_found", rid });
-      if (st.size > MAX_FILE_SIZE) return res.status(413).json({ error: "too_large", rid });
+      const source = String(req.query.source || "").trim();
+      if (!source) return res.status(400).json({ error: "paramètre ?source requis" });
+      const base = path.basename(source); // évite les chemins relatifs
+      const full = path.join(KB_DIR, base);
+      if (!fs.existsSync(full)) return res.status(404).json({ error: "fichier introuvable" });
+
       const content = await fs.promises.readFile(full, "utf8");
-      req.log?.info?.({ rid, action: "show_file", source: name, ip: req.ip }, "kb_file");
-      res.json({ source: name, content });
+      // Pas de binaire, pas d’énorme fichier — c’est pour lecture rapide
+      return res.json({ source: base, content });
     } catch (err) {
-      res.status(500).json({ error: "read_error", rid });
+      return res.status(500).json({ error: String(err?.message || err) });
     }
   });
 

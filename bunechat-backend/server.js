@@ -107,11 +107,11 @@ logger.info({ backend: search?.name || "json" }, "search_backend_ready");
 
 /* ---------------------- Routes ---------------------- */
 // Phase A: chat simple + stream
-app.use("/chatbot/ask",        createAskRouter({        model, SYSTEM_PROMPT, logChat }));
-app.use("/chatbot/ask/stream", createAskStreamRouter({  model, SYSTEM_PROMPT, logChat }));
+app.use("/chatbot/ask",        createAskRouter({       model, SYSTEM_PROMPT, logChat }));
+app.use("/chatbot/ask/stream", createAskStreamRouter({ model, SYSTEM_PROMPT, logChat }));
 
-// Phase B: RAG (l’adapter est utilisé en interne par la route ou injecté selon ta version)
-app.use("/chatbot/ask/rag",    createAskRagRouter({     model, SYSTEM_PROMPT, logChat /*, search*/ }));
+// Phase B: RAG (on **injecte** l'adapter)
+app.use("/chatbot/ask/rag",    createAskRagRouter({    model, SYSTEM_PROMPT, logChat, search }));
 
 // Outils KB (reload/stats/ready)
 app.use("/kb", createKbRouter({ search }));

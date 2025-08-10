@@ -1,15 +1,17 @@
 // src/App.tsx
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import KbStatusBar from "./components/KbStatusBar";
+import ActionBar from "./components/ActionBar";
+import Modal from "./components/Modal";
+import type { ChatMessage, Action } from "./types";
 
-type Role = "user" | "assistant";
-interface ChatMessage { role: Role; content: string }
 interface Evidence { source: string; score: string | number; preview: string }
 
 const API_BASE   = import.meta.env.VITE_API_URL || "http://localhost:3002";
 const API_URL    = `${API_BASE}/chatbot/ask`;
 const STREAM_URL = `${API_BASE}/chatbot/ask/stream`;
 const RAG_URL    = `${API_BASE}/chatbot/ask/rag`;
+const FILE_URL   = `${API_BASE}/kb/file`;
 
 // --- utils ---
 const uniq = <T,>(arr: T[]) => Array.from(new Set(arr));
@@ -38,6 +40,10 @@ export default function App() {
   const [mode, setMode] = useState("—");
 
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [modal, setModal] = useState({ open: false, title: "", content: "" });
+  const openModal = (title: string, content: string) => setModal({ open: true, title, content });
+  const closeModal = () => setModal({ open: false, title: "", content: "" });
 
   // ---- Typewriter (stream & RAG typewriter) ----
   const queueRef = useRef<string[]>([]);  // file des caractères à afficher
@@ -70,7 +76,8 @@ export default function App() {
 
   // ---- Helpers UI ----
   const pushUser = (content: string) => setMessages((prev) => [...prev, { role: "user", content }]);
-  const pushAssistant = (content: string) => setMessages((prev) => [...prev, { role: "assistant", content }]);
+  const pushAssistant = (content: string, actions: Action[] = []) =>
+    setMessages((prev) => [...prev, { role: "assistant", content, actions }]);
   const resetSources  = () => setLastSources([]);
   const resetEvidence = () => setLastEvidence([]);
 
@@ -78,6 +85,45 @@ export default function App() {
     const content = input.trim();
     if (!content || loading) return null;
     return content;
+  };
+
+  const handleProposeFix = async (a: Extract<Action, { type: "propose_fix" }>) => {
+    const prompt = `À partir du contexte précédent, génère un correctif étape par étape pour ${a.payload.topic}.`;
+    const next = [...messages, { role: "user", content: prompt } as ChatMessage];
+    pushUser(a.label);
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next }),
+      });
+      if (!res.ok) throw new Error("HTTP_" + res.status);
+      const data = await res.json().catch(() => ({}));
+      pushAssistant(data.reply || "Désolé, pas de réponse.");
+    } catch (err: any) {
+      pushAssistant(String(err?.message || "⚠️ Erreur réseau/serveur."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (a: Action) => {
+    if (a.type === "show_file") {
+      try {
+        const res = await fetch(`${FILE_URL}?source=${encodeURIComponent(a.payload.source)}`);
+        if (!res.ok) throw new Error("HTTP_" + res.status);
+        const data = await res.json().catch(() => ({}));
+        openModal(a.payload.source, data.content || "Fichier vide.");
+      } catch (err: any) {
+        openModal(a.payload.source, String(err?.message || "Erreur fichier."));
+      }
+    } else if (a.type === "propose_fix") {
+      await handleProposeFix(a);
+    } else if (a.type === "ask_followup") {
+      setInput(a.payload.suggestion);
+      inputRef.current?.focus();
+    }
   };
 
   // ---- LLM simple (non stream) ----
@@ -251,7 +297,8 @@ export default function App() {
       const sourcesMeta = Array.isArray(data?.meta?.sources) ? (data.meta.sources as string[]) : [];
       const evidence = Array.isArray(data?.meta?.evidence) ? (data.meta.evidence as Evidence[]) : [];
 
-      pushAssistant(text);
+      const actions = Array.isArray(data?.actions) ? (data.actions as Action[]) : [];
+      pushAssistant(text, actions);
       setLastSources(uniq([...sourcesMeta, ...sourcesFromText]));
       setLastEvidence(evidence);
       setLastLatency(Math.round(performance.now() - started));
@@ -307,12 +354,13 @@ export default function App() {
       const { text, sourcesFromText } = extractSources(rawReply);
       const sourcesMeta = Array.isArray(data?.meta?.sources) ? (data.meta.sources as string[]) : [];
       const evidence = Array.isArray(data?.meta?.evidence) ? (data.meta.evidence as Evidence[]) : [];
+      const actions = Array.isArray(data?.actions) ? (data.actions as Action[]) : [];
 
       setLastSources(uniq([...sourcesMeta, ...sourcesFromText]));
       setLastEvidence(evidence);
 
       // Affichage caractère par caractère
-      pushAssistant("");
+      pushAssistant("", actions);
       for (const ch of text as string) queueRef.current.push(ch);
       startTyping();
 
@@ -367,6 +415,9 @@ export default function App() {
             <div key={i} style={{ ...styles.msg, ...(m.role === "user" ? styles.user : styles.assistant) }}>
               <strong style={{ opacity: .8 }}>{m.role === "user" ? "Toi" : "Assistant"}</strong>
               <p style={styles.p}>{m.content}</p>
+              {m.role === "assistant" && m.actions && m.actions.length > 0 && (
+                <ActionBar actions={m.actions} onAction={handleAction} />
+              )}
             </div>
           ))}
           {loading && <div style={styles.typing}>Assistant est en train d'écrire…</div>}
@@ -374,6 +425,7 @@ export default function App() {
 
         <form onSubmit={(e)=>e.preventDefault()} style={styles.form}>
           <input
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Pose ta question…"
@@ -418,6 +470,9 @@ export default function App() {
           </div>
         )}
       </div>
+      <Modal open={modal.open} onClose={closeModal} title={modal.title}>
+        {modal.content}
+      </Modal>
     </div>
   );
 }

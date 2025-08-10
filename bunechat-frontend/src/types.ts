@@ -10,3 +10,9 @@ export interface ChatMessage {
   content: string;
   actions?: Action[]; // <-- indispensable pour Phase C
 }
+
+export interface Evidence {
+  source: string;
+  score: string | number;
+  preview: string;
+}

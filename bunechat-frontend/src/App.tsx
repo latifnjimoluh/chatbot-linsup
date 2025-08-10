@@ -10,19 +10,15 @@ import {
 import KbStatusBar from "./components/KbStatusBar";
 import ActionBar from "./components/ActionBar";
 import Modal from "./components/Modal";
-import type { ChatMessage, Action } from "./types";
-
-interface Evidence {
-  source: string;
-  score: string | number;
-  preview: string;
-}
+import type { ChatMessage, Action, Evidence } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3002";
 const API_URL = `${API_BASE}/chatbot/ask`;
 const STREAM_URL = `${API_BASE}/chatbot/ask/stream`;
 const RAG_URL = `${API_BASE}/chatbot/ask/rag`;
 const FILE_URL = `${API_BASE}/kb/file`;
+
+const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
 // --- utils ---
 const uniq = <T,>(arr: T[]) => Array.from(new Set(arr));
@@ -129,7 +125,7 @@ export default function App() {
     try {
       const res = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: JSON_HEADERS,
         body: JSON.stringify({ messages: next }),
       });
       if (!res.ok) throw new Error("HTTP_" + res.status);
@@ -144,16 +140,18 @@ export default function App() {
 
   const handleAction = async (a: Action) => {
     if (a.type === "show_file") {
+      openModal(a.payload.source, "Chargement…");
       try {
         const res = await fetch(
           `${FILE_URL}?source=${encodeURIComponent(a.payload.source)}`
         );
-        if (!res.ok) throw new Error("HTTP_" + res.status);
         const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `HTTP_${res.status}`);
         openModal(a.payload.source, data.content || "Fichier vide.");
       } catch (err: any) {
         openModal(a.payload.source, String(err?.message || "Erreur fichier."));
       }
+      return;
     } else if (a.type === "propose_fix") {
       await handleProposeFix(a);
     } else if (a.type === "ask_followup") {
@@ -183,7 +181,7 @@ export default function App() {
     try {
       const res = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: JSON_HEADERS,
         body: JSON.stringify({ messages: next }),
         signal: controller.signal,
       });
@@ -236,7 +234,7 @@ export default function App() {
     try {
       const res = await fetch(STREAM_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: JSON_HEADERS,
         body: JSON.stringify({ messages: next }),
       });
       if (!res.ok || !res.body) throw new Error("HTTP_" + res.status);
@@ -315,7 +313,7 @@ export default function App() {
     try {
       const res = await fetch(RAG_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: JSON_HEADERS,
         body: JSON.stringify({ messages: next }),
         signal: controller.signal,
       });
@@ -384,7 +382,7 @@ export default function App() {
     try {
       const res = await fetch(RAG_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: JSON_HEADERS,
         body: JSON.stringify({ messages: next }),
       });
 
@@ -502,7 +500,7 @@ export default function App() {
               {m.role === "assistant" &&
                 m.actions &&
                 m.actions.length > 0 && (
-                  <ActionBar actions={m.actions} onAction={handleAction} />
+                  <ActionBar actions={m.actions} onAction={handleAction} disabled={loading} />
                 )}
             </div>
           ))}

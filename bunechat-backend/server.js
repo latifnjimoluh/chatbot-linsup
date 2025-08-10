@@ -9,6 +9,7 @@ import pino from "pino";
 import pinoHttp from "pino-http";
 import { nanoid } from "nanoid";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import rateLimit from "express-rate-limit";
 
 import createAskRouter from "./routes/ask.js";
 import createAskStreamRouter from "./routes/askStream.js";
@@ -31,7 +32,7 @@ app.use(
   cors({
     origin: process.env.ALLOWED_ORIGIN || "*",
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type"],
   })
 );
 
@@ -45,6 +46,15 @@ app.use(
     genReqId: () => nanoid(10),
   })
 );
+
+const limiter = rateLimit({
+  windowMs: 60_000,
+  max: Number(process.env.RATE_LIMIT_MAX || 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use("/chatbot", limiter);
 
 // JSONL app log des échanges
 const chatLogPath = path.join(logsDir, "chat.log");

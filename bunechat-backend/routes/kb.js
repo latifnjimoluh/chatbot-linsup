@@ -95,17 +95,27 @@ export default function createKbRouter({ search }) {
   // --- Lecture read-only d’un fichier de la KB (Phase C)
   router.get("/file", async (req, res) => {
     try {
-      const source = String(req.query.source || "").trim();
-      if (!source) return res.status(400).json({ error: "paramètre ?source requis" });
-      const base = path.basename(source); // évite les chemins relatifs
-      const full = path.join(KB_DIR, base);
-      if (!fs.existsSync(full)) return res.status(404).json({ error: "fichier introuvable" });
+      const q = String(req.query.source || "").trim();
+      if (!q) return res.status(400).json({ error: "source manquant" });
 
-      const content = await fs.promises.readFile(full, "utf8");
-      // Pas de binaire, pas d’énorme fichier — c’est pour lecture rapide
-      return res.json({ source: base, content });
-    } catch (err) {
-      return res.status(500).json({ error: String(err?.message || err) });
+      // nom de fichier simple uniquement
+      const base = path.basename(q);
+      const full = path.join(KB_DIR, base);
+
+      // full doit rester DANS KB_DIR
+      const rel = path.relative(KB_DIR, full);
+      if (rel.startsWith("..") || path.isAbsolute(rel)) {
+        return res.status(400).json({ error: "chemin invalide" });
+      }
+      if (!fs.existsSync(full)) {
+        return res.status(404).json({ error: "fichier introuvable" });
+      }
+      const max = 200 * 1024; // 200KB
+      const buf = await fs.promises.readFile(full);
+      const content = buf.slice(0, max).toString("utf8");
+      res.json({ source: base, size: buf.length, truncated: buf.length > max, content });
+    } catch (e) {
+      res.status(500).json({ error: String(e?.message || e) });
     }
   });
 

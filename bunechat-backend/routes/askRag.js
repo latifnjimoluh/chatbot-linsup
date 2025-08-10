@@ -1,8 +1,14 @@
 // routes/askRag.js
 import express from "express";
 import { nanoid } from "nanoid";
+import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { getSearch } from "../adapters/search/index.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const KB_DIR = path.resolve(__dirname, "..", process.env.KB_DIR || "knowledge_base");
 
 // -------- Env & bornes --------
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -192,9 +198,16 @@ export default function createAskRagRouter({ model, SYSTEM_PROMPT, logChat }) {
       if (!ctx.length) {
         const durationMs = Date.now() - started;
         logChat?.({ rid, t: new Date().toISOString(), ip: req.ip, ok: true, mode: "rag:none", durationMs, aChars: 0 });
+        const actions = [{
+          id: nanoid(6),
+          type: "ask_followup",
+          label: "Me demander les logs",
+          payload: { suggestion: "Peux-tu coller la sortie de `journalctl -u <service> -n 80` ?" },
+        }];
         return res.json({
           reply: "Je n'ai pas trouvé d'information pertinente dans la base pour répondre précisément.",
           meta: { rid, durationMs, sources: [], evidence: [] },
+          actions,
         });
       }
 
@@ -206,6 +219,47 @@ export default function createAskRagRouter({ model, SYSTEM_PROMPT, logChat }) {
       }));
 
       const sources = [...new Set(ctx.map((h) => normSource(h.source)))];
+
+      // 2c) Actions heuristiques
+      const actions = [];
+      for (const s of sources.slice(0, 3)) {
+        if (!/\.(md|txt|sh|log)$/i.test(s)) continue;
+        try {
+          const full = path.join(KB_DIR, s);
+          if (fs.existsSync(full)) {
+            actions.push({
+              id: nanoid(6),
+              type: "show_file",
+              label: `Ouvrir ${s}`,
+              payload: { source: s },
+            });
+          }
+        } catch {}
+      }
+      const qLow = question.toLowerCase();
+      const ctxLow = ctx.map((c) => c.text.toLowerCase()).join(" ");
+      if (qLow.includes("dns") || qLow.includes("bind") || ctxLow.includes("dns") || ctxLow.includes("bind")) {
+        actions.push({
+          id: nanoid(6),
+          type: "propose_fix",
+          label: "Proposer un correctif Bind9",
+          payload: { topic: "dns_bind9" },
+        });
+      }
+      if (qLow.includes("ssh")) {
+        actions.push({
+          id: nanoid(6),
+          type: "propose_fix",
+          label: "Renforcer SSH",
+          payload: { topic: "ssh_hardening" },
+        });
+      }
+      actions.push({
+        id: nanoid(6),
+        type: "ask_followup",
+        label: "Me demander les logs",
+        payload: { suggestion: "Peux-tu coller la sortie de `journalctl -u <service> -n 80` ?" },
+      });
 
       // 3) Prompt enrichi
       const prompt = buildPrompt({
@@ -238,7 +292,7 @@ export default function createAskRagRouter({ model, SYSTEM_PROMPT, logChat }) {
         qChars: question.length, aChars: final.length, sources,
       });
 
-      return res.json({ reply: final, meta: { rid, durationMs, sources, evidence } });
+      return res.json({ reply: final, meta: { rid, durationMs, sources, evidence }, actions });
     } catch (err) {
       const durationMs = Date.now() - started;
 

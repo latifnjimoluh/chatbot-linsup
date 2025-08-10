@@ -286,9 +286,16 @@ export default function createAskRagRouter({ model, SYSTEM_PROMPT, logChat, sear
 
       const durationMs = Date.now() - started;
       logChat?.({
-        rid, t: new Date().toISOString(), ip: req.ip,
-        durationMs, ok: true, mode: `rag(topK=${TOP_K},min=${MIN_SCORE ?? "off"})`,
-        qChars: question.length, aChars: final.length, sources,
+        rid,
+        t: new Date().toISOString(),
+        ip: req.ip,
+        durationMs,
+        ok: true,
+        mode: `rag(topK=${TOP_K},min=${MIN_SCORE ?? "off"})`,
+        qChars: question.length,
+        aChars: final.length,
+        sources,
+        actions: actions.map((a) => a.type),
       });
 
       return res.json({ reply: final, meta: { rid, durationMs, sources, evidence }, actions });

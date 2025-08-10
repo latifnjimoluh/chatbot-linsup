@@ -1,12 +1,48 @@
-# React + Vite
+# BUNEC Chatbot Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Interface React pour interagir avec l'API du chatbot BUNEC.
 
-Currently, two official plugins are available:
+## Installation
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+cd bunechat-frontend
+npm install
+```
 
-## Expanding the ESLint configuration
+## Configuration
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Crée un fichier `.env` à la racine :
+
+```env
+VITE_API_URL=http://localhost:3002
+VITE_CLIENT_TOKEN=change-me # optionnel si auth désactivée
+```
+
+## Démarrer en développement
+
+```bash
+npm run dev
+```
+
+## Lancer le lint
+
+```bash
+npm run lint
+```
+
+## Build de production
+
+```bash
+npm run build
+```
+
+L'application attend les routes suivantes exposées par le backend :
+
+- `POST /chatbot/ask`
+- `POST /chatbot/ask/stream`
+- `POST /chatbot/ask/rag`
+- `GET  /kb/stats`
+- `POST /kb/reload`
+- `GET  /kb/file?source=<fichier>`
+
+Tous les appels réseau passent par ces endpoints, aucun mock n'est utilisé.

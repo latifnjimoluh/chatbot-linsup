@@ -41,6 +41,7 @@ L'application attend les routes suivantes exposées par le backend :
 - `POST /chatbot/ask`
 - `POST /chatbot/ask/stream`
 - `POST /chatbot/ask/rag`
+- `POST /chatbot/agent`
 - `GET  /kb/stats`
 - `POST /kb/reload`
 - `GET  /kb/file?source=<fichier>`

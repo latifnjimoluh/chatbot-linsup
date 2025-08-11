@@ -14,6 +14,7 @@ import rateLimit from "express-rate-limit";
 import createAskRouter from "./routes/ask.js";
 import createAskStreamRouter from "./routes/askStream.js";
 import createAskRagRouter from "./routes/askRag.js";
+import createAgentRouter from "./routes/agent.js";
 import createKbRouter from "./routes/kb.js";
 import { getSearch } from "./adapters/search/index.js";
 
@@ -119,6 +120,7 @@ logger.info({ backend: search?.name || "json" }, "search_backend_ready");
 // Phase A: chat simple + stream
 app.use("/chatbot/ask",        createAskRouter({       model, SYSTEM_PROMPT, logChat }));
 app.use("/chatbot/ask/stream", createAskStreamRouter({ model, SYSTEM_PROMPT, logChat }));
+app.use("/chatbot/agent",      createAgentRouter({ model, search }));
 
 // Phase B: RAG (on **injecte** l'adapter)
 app.use("/chatbot/ask/rag",    createAskRagRouter({    model, SYSTEM_PROMPT, logChat, search }));

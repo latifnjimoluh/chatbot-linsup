@@ -17,6 +17,7 @@ const API_URL = `${API_BASE}/chatbot/ask`;
 const STREAM_URL = `${API_BASE}/chatbot/ask/stream`;
 const RAG_URL = `${API_BASE}/chatbot/ask/rag`;
 const FILE_URL = `${API_BASE}/kb/file`;
+const AGENT_URL = `${API_BASE}/chatbot/agent`;
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
@@ -34,6 +35,39 @@ function extractSources(text: string) {
     .filter(Boolean);
   const cleaned = text.replace(re, "").trimEnd();
   return { text: cleaned, sourcesFromText: uniq(sourcesRaw) };
+}
+
+function mapAgentActions(arr: any[]): Action[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((a: any, i: number) => {
+      switch (a.tool) {
+        case "show_file":
+          return {
+            id: `agent-${i}`,
+            type: "show_file",
+            label: `Voir ${a.args?.source || "fichier"}`,
+            payload: { source: a.args?.source || "" },
+          };
+        case "propose_fix":
+          return {
+            id: `agent-${i}`,
+            type: "propose_fix",
+            label: `Fix ${a.args?.topic || ""}`,
+            payload: { topic: a.args?.topic || "" },
+          };
+        case "ask_followup":
+          return {
+            id: `agent-${i}`,
+            type: "ask_followup",
+            label: a.result || a.args?.suggestion || "Question suivante",
+            payload: { suggestion: a.result || a.args?.suggestion || "" },
+          };
+        default:
+          return null;
+      }
+    })
+    .filter(Boolean) as Action[];
 }
 
 export default function App() {
@@ -433,6 +467,52 @@ export default function App() {
     }
   };
 
+  const sendAgent = async (e?: FormEvent) => {
+    e?.preventDefault?.();
+    const content = guard();
+    if (!content) return;
+
+    setMode("AGENT");
+    resetSources();
+    resetEvidence();
+    const next = [...messages, { role: "user", content } as ChatMessage];
+    setMessages(next);
+    setInput("");
+    setLoading(true);
+
+    const started = performance.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+
+    try {
+      const res = await fetch(AGENT_URL, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ question: content }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        let msg = `HTTP_${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.error) msg = `⚠️ ${data.error}`;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const data = await res.json().catch(() => ({}));
+      const actions = mapAgentActions(data?.actions);
+      pushAssistant(data?.reply || "Désolé, pas de réponse.", actions);
+      setLastLatency(Math.round(performance.now() - started));
+    } catch (err: any) {
+      pushAssistant(String(err?.message || "⚠️ Erreur agent."));
+    } finally {
+      clearTimeout(timer);
+      setLoading(false);
+    }
+  };
+
   // ---- UI ----
   const clearChat = () => {
     stopTyping();
@@ -549,6 +629,13 @@ export default function App() {
               style={styles.btnRag2}
             >
               RAG (mot-à-mot)
+            </button>
+            <button
+              onClick={sendAgent}
+              disabled={loading || !input.trim()}
+              style={styles.btnAgent}
+            >
+              Agent
             </button>
             <button onClick={clearChat} disabled={loading} style={styles.btnGhost}>
               Effacer
@@ -694,6 +781,14 @@ const styles: Record<string, CSSProperties> = {
     border: "none",
     background: "#f97316",
     color: "#111827",
+    cursor: "pointer",
+  },
+  btnAgent: {
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: "none",
+    background: "#9333ea",
+    color: "white",
     cursor: "pointer",
   },
   btnGhost: {
